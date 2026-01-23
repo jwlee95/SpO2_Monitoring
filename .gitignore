@@ -4,4 +4,6 @@ spo2_processing01.py
 /venv/
 settings.json
 __pycache__/
+/build/
+#/dist/
 
