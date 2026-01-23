@@ -3,3 +3,5 @@ spo2_gui_app.py
 spo2_processing01.py
 /venv/
 settings.json
+__pycache__/
+
