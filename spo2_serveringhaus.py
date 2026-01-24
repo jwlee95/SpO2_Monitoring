@@ -18,7 +18,7 @@ class RespiratoryGasAnalyzer:
             sensor_rh_pct (float): 센서가 측정한 상대습도 (%) - 수증기압 보정용
             o2_pct (float): 센서 측정 산소 농도 (%)
             co2_pct (float): 센서 측정 이산화탄소 농도 (%)
-            body_temp_c (float): 피험자의 체온 (섭씨, 기본값 37.0) - ODC Shift 계산용
+            body_temp_c (float): 피험자의 체온 (섭씨, 기본값 37.0) - ODC Shift 계산용 
             
         Returns:
             dict: 최종 SpO2 및 중간 계산 값들

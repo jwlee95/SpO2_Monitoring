@@ -20,6 +20,10 @@
          - 데이터 로깅 기능 추가 (CSV 저장, Subject No/Comment 입력)
          - CSV 헤더 및 파일명 형식 지정 (Subject_No_YYMMDD_HHMM.csv)
 
+         주요 변경 사항 (2026-01-24):
+         - SpO2 EST 라벨을 Est. SpO2로 변경 및 그래프에 빨간색 점선으로 데이터 추가
+         - LCD 디스플레이 위젯을 QLabel로 변경하여 폰트 크기 확대 (32pt) 및 가독성 개선
+
 @author User (JeongWhan Lee)
 @date 2025-11-30
 @version 1.3.0
@@ -38,7 +42,7 @@ from itertools import islice
 
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QComboBox, QPushButton, QTextEdit, QLabel, QLineEdit, QSpinBox,
-                             QGroupBox, QStatusBar, QTabWidget, QScrollBar, QLCDNumber, QCheckBox, QGridLayout, QMessageBox, QFileDialog)
+                             QGroupBox, QStatusBar, QTabWidget, QScrollBar, QLCDNumber, QCheckBox, QGridLayout, QMessageBox, QFileDialog, QDoubleSpinBox)
 from PyQt5.QtCore import QThread, pyqtSignal, QObject, Qt, QTimer, QDateTime
 import pyqtgraph as pg
 from sp02_sensor_converter import GasSensorConverter
@@ -182,6 +186,7 @@ class SpO2MonitorApp(QMainWindow):
         self.pa_data = deque()
         self.o2_sat_data = deque()
         self.co2_sat_data = deque()
+        self.est_spo2_data = deque()
 
         # --- UI 구성 ---
         main_widget = QWidget()
@@ -265,6 +270,35 @@ class SpO2MonitorApp(QMainWindow):
         self.clear_button = QPushButton("Clear Screen")
         control_layout.addWidget(self.start_button)
         control_layout.addWidget(self.clear_button)
+        
+        # 환경 변수 설정 (체온, 센서 온도, 습도)
+        control_layout.addSpacing(15)
+        control_layout.addWidget(QLabel("Body Temp(°C):"))
+        self.body_temp_spin = QDoubleSpinBox()
+        self.body_temp_spin.setRange(30.0, 45.0)
+        self.body_temp_spin.setValue(37.0)
+        self.body_temp_spin.setSingleStep(0.1)
+        control_layout.addWidget(self.body_temp_spin)
+
+        control_layout.addWidget(QLabel("Sensor Temp(°C):"))
+        self.sensor_temp_spin = QDoubleSpinBox()
+        self.sensor_temp_spin.setRange(-10.0, 60.0)
+        self.sensor_temp_spin.setValue(25.0)
+        self.sensor_temp_spin.setSingleStep(0.1)
+        control_layout.addWidget(self.sensor_temp_spin)
+
+        control_layout.addWidget(QLabel("Sensor Humid(%):"))
+        self.sensor_humid_spin = QDoubleSpinBox()
+        self.sensor_humid_spin.setRange(0.0, 100.0)
+        self.sensor_humid_spin.setValue(60.0)
+        self.sensor_humid_spin.setSingleStep(1.0)
+        control_layout.addWidget(self.sensor_humid_spin)
+
+        # 값 변경 시 즉시 재계산 연결
+        self.body_temp_spin.valueChanged.connect(self.recalculate_current_spo2)
+        self.sensor_temp_spin.valueChanged.connect(self.recalculate_current_spo2)
+        self.sensor_humid_spin.valueChanged.connect(self.recalculate_current_spo2)
+
         control_layout.addStretch()
 
         # Recording Controls
@@ -338,29 +372,38 @@ class SpO2MonitorApp(QMainWindow):
 
         # 오른쪽: LCD 디스플레이
         lcd_layout = QVBoxLayout()
-        self.spo2_lcd = QLCDNumber()
-        self.spo2_lcd.setDigitCount(5)
-        self.spo2_lcd.setSegmentStyle(QLCDNumber.Flat)
-        self.spo2_lcd.setStyleSheet("background-color: black; color: red; border: 1px solid gray;")
+        
+        # 공통 스타일 정의 (폰트 크기 32pt로 설정하여 숫자 크게 표시)
+        lcd_style = "background-color: black; border: 1px solid gray; font-size: 32pt; font-weight: bold;"
+        
+        self.est_spo2_lcd = QLabel("0.00")
+        self.est_spo2_lcd.setAlignment(Qt.AlignCenter)
+        self.est_spo2_lcd.setStyleSheet(lcd_style + " color: yellow;")
+        self.est_spo2_lcd.setMinimumHeight(80)
+
+        self.spo2_lcd = QLabel("0")
+        self.spo2_lcd.setAlignment(Qt.AlignCenter)
+        self.spo2_lcd.setStyleSheet(lcd_style + " color: red;")
         self.spo2_lcd.setMinimumHeight(80)
-        self.bpm_lcd = QLCDNumber()
-        self.bpm_lcd.setDigitCount(5)
-        self.bpm_lcd.setSegmentStyle(QLCDNumber.Flat)
-        self.bpm_lcd.setStyleSheet("background-color: black; color: green; border: 1px solid gray;")
+
+        self.bpm_lcd = QLabel("0")
+        self.bpm_lcd.setAlignment(Qt.AlignCenter)
+        self.bpm_lcd.setStyleSheet(lcd_style + " color: green;")
         self.bpm_lcd.setMinimumHeight(80)
         
-        self.o2_sat_lcd = QLCDNumber()
-        self.o2_sat_lcd.setDigitCount(5)
-        self.o2_sat_lcd.setSegmentStyle(QLCDNumber.Flat)
-        self.o2_sat_lcd.setStyleSheet("background-color: black; color: magenta; border: 1px solid gray;")
+        self.o2_sat_lcd = QLabel("0.00")
+        self.o2_sat_lcd.setAlignment(Qt.AlignCenter)
+        self.o2_sat_lcd.setStyleSheet(lcd_style + " color: magenta;")
         self.o2_sat_lcd.setMinimumHeight(80)
 
-        self.co2_sat_lcd = QLCDNumber()
-        self.co2_sat_lcd.setDigitCount(5)
-        self.co2_sat_lcd.setSegmentStyle(QLCDNumber.Flat)
-        self.co2_sat_lcd.setStyleSheet("background-color: black; color: cyan; border: 1px solid gray;")
+        self.co2_sat_lcd = QLabel("0.00")
+        self.co2_sat_lcd.setAlignment(Qt.AlignCenter)
+        self.co2_sat_lcd.setStyleSheet(lcd_style + " color: cyan;")
         self.co2_sat_lcd.setMinimumHeight(80)
 
+        lcd_layout.addWidget(QLabel("Est. SpO2 (%)"))
+        lcd_layout.addWidget(self.est_spo2_lcd)
+        lcd_layout.addSpacing(20)
         lcd_layout.addWidget(QLabel("SpO2 (%)"))
         lcd_layout.addWidget(self.spo2_lcd)
         lcd_layout.addSpacing(20)
@@ -434,6 +477,7 @@ class SpO2MonitorApp(QMainWindow):
         self.spo2_curve = self.plot_widget.plot(pen=pg.mkPen(color=(255, 0, 0), width=2), name='<span style="font-size: 12pt">SpO2 (%)</span>')
         self.bpm_curve = self.plot_widget.plot(pen=pg.mkPen(color=(0, 255, 0), width=2), name='<span style="font-size: 12pt">PR (BPM)</span>')
         self.pa_curve = self.plot_widget.plot(pen=pg.mkPen(color=(0, 0, 255), width=2), name='<span style="font-size: 12pt">PA</span>')
+        self.est_spo2_curve = self.plot_widget.plot(pen=pg.mkPen(color=(255, 0, 0), width=2, style=Qt.DashLine), name='<span style="font-size: 12pt">Est. SpO2 (%)</span>')
         self.o2_sat_curve = self.plot_widget.plot(pen=pg.mkPen(color=(255, 0, 255), width=2, style=Qt.DashLine), name='<span style="font-size: 12pt">O2 Sat (P2)</span>')
         self.co2_sat_curve = self.plot_widget.plot(pen=pg.mkPen(color=(0, 255, 255), width=2, style=Qt.DashLine), name='<span style="font-size: 12pt">CO2 Sat (P2)</span>')
 
@@ -441,6 +485,7 @@ class SpO2MonitorApp(QMainWindow):
         self.spo2_curve.setData([], [])
         self.bpm_curve.setData([], [])
         self.pa_curve.setData([], [])
+        self.est_spo2_curve.setData([], [])
         self.o2_sat_curve.setData([], [])
         self.co2_sat_curve.setData([], [])
 
@@ -638,10 +683,12 @@ class SpO2MonitorApp(QMainWindow):
                 o2_conc = self.gas_converter.get_o2_concentration(avg_adc_o2)
                 co2_conc = self.gas_converter.get_co2_concentration(avg_adc_co2)
                 
-                # 2. 가스 농도 -> SpO2 추정 (온습도는 25도, 50% 가정)
+                # 2. 가스 농도 -> SpO2 추정 (UI 입력값 사용)
                 spo2_res = self.gas_analyzer.calculate_spo2(
-                    sensor_t_c=25.0, sensor_rh_pct=50.0,
-                    o2_pct=o2_conc, co2_pct=co2_conc
+                    sensor_t_c=self.sensor_temp_spin.value(),
+                    sensor_rh_pct=self.sensor_humid_spin.value(),
+                    o2_pct=o2_conc, co2_pct=co2_conc,
+                    body_temp_c=self.body_temp_spin.value()
                 )
                 est_spo2 = spo2_res['SpO2_Percent']
                 
@@ -688,6 +735,30 @@ class SpO2MonitorApp(QMainWindow):
         except Exception as e:
             self.update_status(f"CSV Write Error: {e}")
 
+    def recalculate_current_spo2(self):
+        """!
+        @brief 환경 변수(체온, 온도, 습도) 변경 시 SpO2를 즉시 재계산하여 로그에 표시합니다.
+        """
+        if not hasattr(self, 'last_port2_avg'):
+            return
+
+        o2_conc = self.last_port2_avg.get('O2_Sat', 0)
+        co2_conc = self.last_port2_avg.get('CO2_Sat', 0)
+
+        spo2_res = self.gas_analyzer.calculate_spo2(
+            sensor_t_c=self.sensor_temp_spin.value(),
+            sensor_rh_pct=self.sensor_humid_spin.value(),
+            o2_pct=o2_conc, co2_pct=co2_conc,
+            body_temp_c=self.body_temp_spin.value()
+        )
+        est_spo2 = spo2_res['SpO2_Percent']
+        self.last_port2_avg['Est_SpO2'] = est_spo2
+
+        # 로그 업데이트
+        log_msg = (f"[Update] Body:{self.body_temp_spin.value()}C Env:{self.sensor_temp_spin.value()}C/{self.sensor_humid_spin.value()}% "
+                   f"-> Est SpO2: {est_spo2:.2f}%")
+        self.data_display2.append(log_msg)
+
     def update_gui_components(self):
         if not self.temp_data_buffer:
             return
@@ -730,6 +801,7 @@ class SpO2MonitorApp(QMainWindow):
                     self.data_display2.append(display_text)
                     self.o2_sat_data.append(data['O2_Sat'])
                     self.co2_sat_data.append(data['CO2_Sat'])
+                    self.est_spo2_data.append(est_spo2)
                     latest_data_2 = data
                 else:
                     # 예외적인 경우 원본 표시
@@ -739,12 +811,14 @@ class SpO2MonitorApp(QMainWindow):
 
         # 3. 최신 데이터로 LCD 업데이트 (Port 1 기준)
         if latest_data_1:
-            self.spo2_lcd.display(latest_data_1['spo2'])
-            self.bpm_lcd.display(latest_data_1['bpm'])
+            self.spo2_lcd.setText(str(latest_data_1['spo2']))
+            self.bpm_lcd.setText(str(latest_data_1['bpm']))
             
         if latest_data_2:
-            self.o2_sat_lcd.display(latest_data_2['O2_Sat'])
-            self.co2_sat_lcd.display(latest_data_2['CO2_Sat'])
+            self.o2_sat_lcd.setText(f"{latest_data_2['O2_Sat']:.2f}")
+            self.co2_sat_lcd.setText(f"{latest_data_2['CO2_Sat']:.2f}")
+            if 'Est_SpO2' in latest_data_2:
+                self.est_spo2_lcd.setText(f"{latest_data_2['Est_SpO2']:.2f}")
 
         # 4. 그래프 업데이트 (Port 1 데이터가 있을 때만)
         if has_new_graph_data:
@@ -840,10 +914,12 @@ class SpO2MonitorApp(QMainWindow):
             pa_slice = list(islice(self.pa_data, start_index, end_index))
             o2_slice = list(islice(self.o2_sat_data, start_index, end_index))
             co2_slice = list(islice(self.co2_sat_data, start_index, end_index))
+            est_spo2_slice = list(islice(self.est_spo2_data, start_index, end_index))
 
             self.spo2_curve.setData(x_slice, spo2_slice, skipFiniteCheck=True)
             self.bpm_curve.setData(x_slice, bpm_slice, skipFiniteCheck=True)
             self.pa_curve.setData(x_slice, pa_slice, skipFiniteCheck=True)
+            self.est_spo2_curve.setData(x_slice, est_spo2_slice, skipFiniteCheck=True)
             self.o2_sat_curve.setData(x_slice, o2_slice, skipFiniteCheck=True)
             self.co2_sat_curve.setData(x_slice, co2_slice, skipFiniteCheck=True)
             
@@ -869,6 +945,7 @@ class SpO2MonitorApp(QMainWindow):
         self.pa_data.clear()
         self.o2_sat_data.clear()
         self.co2_sat_data.clear()
+        self.est_spo2_data.clear()
 
         # 3. 초기 더미 데이터 채우기 (좌측 스크롤 효과를 위해)
         initial_points = self.points_spinbox.value()
@@ -881,15 +958,17 @@ class SpO2MonitorApp(QMainWindow):
             self.pa_data.append(0)
             self.o2_sat_data.append(0)
             self.co2_sat_data.append(0)
+            self.est_spo2_data.append(0)
 
         # 4. 그래프 및 스크롤바 업데이트
         self.update_plot_view(is_new_data=False)
         
         # LCD 초기화
-        self.spo2_lcd.display(0)
-        self.bpm_lcd.display(0)
-        self.o2_sat_lcd.display(0)
-        self.co2_sat_lcd.display(0)
+        self.est_spo2_lcd.setText("0.00")
+        self.spo2_lcd.setText("0")
+        self.bpm_lcd.setText("0")
+        self.o2_sat_lcd.setText("0.00")
+        self.co2_sat_lcd.setText("0.00")
 
     def update_status(self, message):
         self.status_bar.showMessage(message)
