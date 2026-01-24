@@ -54,6 +54,26 @@ pyserial >= 3.5
 pyqtgraph >= 0.13.0
 ```
 
+### 설치 방법 (Windows, PowerShell 기준)
+1. 가상환경 생성 및 활성화 (권장)
+	```powershell
+	python -m venv venv
+	.\venv\Scripts\activate
+	```
+2. 패키지 설치 (requirements.txt 사용)
+	```powershell
+	pip install --upgrade pip
+	pip install -r requirements.txt
+	```
+3. 설치 확인 (필수 패키지 버전 확인)
+	```powershell
+	pip show PyQt5 pyserial pyqtgraph
+	```
+
+> venv 비활성화: PowerShell에서 `deactivate`
+
+- 필요한 경우: PowerShell에서 python -m venv venv, activate, pip install -r requirements.txt 순으로 실행해 주세요.
+
 ### 하드웨어
 - SpO2 센서 (시리얼 포트)
 - O2/CO2 센서 (선택사항)
