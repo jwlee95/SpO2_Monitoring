@@ -42,11 +42,12 @@ from itertools import islice
 
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QComboBox, QPushButton, QTextEdit, QLabel, QLineEdit, QSpinBox,
-                             QGroupBox, QStatusBar, QTabWidget, QScrollBar, QLCDNumber, QCheckBox, QGridLayout, QMessageBox, QFileDialog, QDoubleSpinBox)
+                             QGroupBox, QStatusBar, QTabWidget, QScrollBar, QLCDNumber, QCheckBox, QGridLayout, QMessageBox, QFileDialog, QDoubleSpinBox, QSplitter, QSizePolicy)
 from PyQt5.QtCore import QThread, pyqtSignal, QObject, Qt, QTimer, QDateTime
 import pyqtgraph as pg
 from sp02_sensor_converter import GasSensorConverter
 from spo2_serveringhaus import RespiratoryGasAnalyzer
+from MordernLCD import MordernLCD
 
 ## @var STATUS_DEFINITIONS 상태 코드 정의 (Table 5-3 기준)
 STATUS_DEFINITIONS = {
@@ -191,7 +192,22 @@ class SpO2MonitorApp(QMainWindow):
         # --- UI 구성 ---
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        layout = QVBoxLayout(main_widget)
+        
+        # 전체 레이아웃 (좌측: 컨트롤+그래프, 우측: LCD)
+        main_layout = QHBoxLayout(main_widget)
+        
+        # 좌측 패널 (기존 UI 요소들)
+        left_panel = QWidget()
+        layout = QVBoxLayout(left_panel) # 기존 layout 변수 재사용
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 우측 패널 (LCD 디스플레이)
+        lcd_panel = QWidget()
+        lcd_main_layout = QVBoxLayout(lcd_panel)
+        lcd_main_layout.setContentsMargins(10, 0, 0, 0)
+        
+        main_layout.addWidget(left_panel, 75)
+        main_layout.addWidget(lcd_panel, 25)
 
         # 시리얼 설정 그룹
         serial_group = QGroupBox("Serial Settings")
@@ -358,67 +374,54 @@ class SpO2MonitorApp(QMainWindow):
         graph_control_layout.addStretch(1)
         graph_layout.addLayout(graph_control_layout)
 
-        # 그래프 영역 레이아웃 (그래프 + LCD)
-        graph_area_layout = QHBoxLayout()
-
-        # 왼쪽: 그래프 및 스크롤바
-        plot_area_layout = QVBoxLayout()
+        # 그래프 및 스크롤바 (좌측 패널의 탭 내부)
         self.plot_widget = pg.PlotWidget(axisItems={'bottom': TimeAxisItem(orientation='bottom')})
-        plot_area_layout.addWidget(self.plot_widget)
+        graph_layout.addWidget(self.plot_widget)
         self.scroll_bar = QScrollBar(Qt.Horizontal)
-        plot_area_layout.addWidget(self.scroll_bar)
-        graph_area_layout.addLayout(plot_area_layout, 1)
-        graph_area_layout.addSpacing(30)
-
-        # 오른쪽: LCD 디스플레이
-        lcd_layout = QVBoxLayout()
+        graph_layout.addWidget(self.scroll_bar)
         
-        # 공통 스타일 정의 (폰트 크기 32pt로 설정하여 숫자 크게 표시)
-        lcd_style = "background-color: black; border: 1px solid gray; font-size: 32pt; font-weight: bold;"
+        # MordernLCD 위젯으로 교체
+        self.est_spo2_lcd = MordernLCD()
+        self.est_spo2_lcd.setColor(Qt.yellow)
+        self.est_spo2_lcd.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.est_spo2_lcd.setMinimumHeight(40)
+
+        self.spo2_lcd = MordernLCD()
+        self.spo2_lcd.setColor(Qt.red)
+        self.spo2_lcd.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.spo2_lcd.setMinimumHeight(40)
+
+        self.bpm_lcd = MordernLCD()
+        self.bpm_lcd.setColor(Qt.green)
+        self.bpm_lcd.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.bpm_lcd.setMinimumHeight(40)
         
-        self.est_spo2_lcd = QLabel("0.00")
-        self.est_spo2_lcd.setAlignment(Qt.AlignCenter)
-        self.est_spo2_lcd.setStyleSheet(lcd_style + " color: yellow;")
-        self.est_spo2_lcd.setMinimumHeight(80)
+        self.o2_sat_lcd = MordernLCD()
+        self.o2_sat_lcd.setColor(Qt.magenta)
+        self.o2_sat_lcd.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.o2_sat_lcd.setMinimumHeight(40)
 
-        self.spo2_lcd = QLabel("0")
-        self.spo2_lcd.setAlignment(Qt.AlignCenter)
-        self.spo2_lcd.setStyleSheet(lcd_style + " color: red;")
-        self.spo2_lcd.setMinimumHeight(80)
+        self.co2_sat_lcd = MordernLCD()
+        self.co2_sat_lcd.setColor(Qt.cyan)
+        self.co2_sat_lcd.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.co2_sat_lcd.setMinimumHeight(40)
 
-        self.bpm_lcd = QLabel("0")
-        self.bpm_lcd.setAlignment(Qt.AlignCenter)
-        self.bpm_lcd.setStyleSheet(lcd_style + " color: green;")
-        self.bpm_lcd.setMinimumHeight(80)
+        # 우측 패널에 LCD 위젯 추가
+        lcd_main_layout.addWidget(QLabel("Est. SpO2 (%)"))
+        lcd_main_layout.addWidget(self.est_spo2_lcd, 1)
+        lcd_main_layout.addSpacing(10)
+        lcd_main_layout.addWidget(QLabel("SpO2 (%)"))
+        lcd_main_layout.addWidget(self.spo2_lcd, 1)
+        lcd_main_layout.addSpacing(10)
+        lcd_main_layout.addWidget(QLabel("HR (BPM)"))
+        lcd_main_layout.addWidget(self.bpm_lcd, 1)
+        lcd_main_layout.addSpacing(10)
+        lcd_main_layout.addWidget(QLabel("O2 Sat (P2)"))
+        lcd_main_layout.addWidget(self.o2_sat_lcd, 1)
+        lcd_main_layout.addSpacing(10)
+        lcd_main_layout.addWidget(QLabel("CO2 Sat (P2)"))
+        lcd_main_layout.addWidget(self.co2_sat_lcd, 1)
         
-        self.o2_sat_lcd = QLabel("0.00")
-        self.o2_sat_lcd.setAlignment(Qt.AlignCenter)
-        self.o2_sat_lcd.setStyleSheet(lcd_style + " color: magenta;")
-        self.o2_sat_lcd.setMinimumHeight(80)
-
-        self.co2_sat_lcd = QLabel("0.00")
-        self.co2_sat_lcd.setAlignment(Qt.AlignCenter)
-        self.co2_sat_lcd.setStyleSheet(lcd_style + " color: cyan;")
-        self.co2_sat_lcd.setMinimumHeight(80)
-
-        lcd_layout.addWidget(QLabel("Est. SpO2 (%)"))
-        lcd_layout.addWidget(self.est_spo2_lcd)
-        lcd_layout.addSpacing(20)
-        lcd_layout.addWidget(QLabel("SpO2 (%)"))
-        lcd_layout.addWidget(self.spo2_lcd)
-        lcd_layout.addSpacing(20)
-        lcd_layout.addWidget(QLabel("HR (BPM)"))
-        lcd_layout.addWidget(self.bpm_lcd)
-        lcd_layout.addSpacing(20)
-        lcd_layout.addWidget(QLabel("O2 Sat (P2)"))
-        lcd_layout.addWidget(self.o2_sat_lcd)
-        lcd_layout.addSpacing(20)
-        lcd_layout.addWidget(QLabel("CO2 Sat (P2)"))
-        lcd_layout.addWidget(self.co2_sat_lcd)
-        lcd_layout.addStretch()
-        graph_area_layout.addLayout(lcd_layout)
-
-        graph_layout.addLayout(graph_area_layout)
         self.setup_graph()
 
         # 상태 표시줄
@@ -440,6 +443,8 @@ class SpO2MonitorApp(QMainWindow):
         bottom_layout.addWidget(self.about_button)
         bottom_layout.addStretch(1)
         self.exit_button = QPushButton("Exit")
+        self.exit_button.setMinimumSize(150, 50)
+        self.exit_button.setStyleSheet("font-size: 20pt; font-weight: bold;")
         bottom_layout.addWidget(self.exit_button)
         layout.addLayout(bottom_layout)
 
@@ -969,6 +974,12 @@ class SpO2MonitorApp(QMainWindow):
         self.bpm_lcd.setText("0")
         self.o2_sat_lcd.setText("0.00")
         self.co2_sat_lcd.setText("0.00")
+
+    def resizeEvent(self, event):
+        """!
+        @brief 윈도우 크기 변경 시 호출되어 레이아웃 비율과 폰트 크기를 조정합니다.
+        """
+        super().resizeEvent(event)
 
     def update_status(self, message):
         self.status_bar.showMessage(message)
